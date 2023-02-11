@@ -1,67 +1,63 @@
-# Configure the AWS Provider
 provider "aws" {
-  region = "us-east-1"
+    region = "us-east-1"
 }
 
-# creating vpc
+variable vpc_cidr_block {}
+variable subnet_cidr_block {}
+variable avail_zone {}
+variable env_prefix {}
+#variable my_ip {}
+variable instance_type {}
+variable ami {}
+#variable public_key_location {}
+variable key_name {}
 
-resource "aws_vpc" "timi_vpc" {
-  cidr_block = "10.0.0.0/16"
-  tags = {
-    Name = "production"
-  }
+
+resource "aws_vpc" "myapp-vpc" {
+    cidr_block = var.vpc_cidr_block
+    tags = {
+        Name = "${var.env_prefix}-vpc"
+    }
 }
 
-# internet gateway
-
-resource "aws_internet_gateway" "timi-gw" {
-  vpc_id = aws_vpc.timi_vpc.id
-
+resource "aws_subnet" "myapp-subnet-1" {
+    vpc_id = aws_vpc.myapp-vpc.id
+    cidr_block = var.subnet_cidr_block
+    availability_zone = var.avail_zone
+    tags = {
+        Name = "${var.env_prefix}-subnet-1"
+    }
 }
 
-# creating route table 
-
-
-resource "aws_route_table" "timi-route-table" {
-  vpc_id = aws_vpc.timi_vpc.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.timi-gw.id
-  }
-
-  route {
-    ipv6_cidr_block        = "::/0"
-    gateway_id             = aws_internet_gateway.timi-gw.id
-  }
-
-  tags = {
-    Name = "production"
-  }
+resource "aws_internet_gateway" "myapp-igw" {
+    vpc_id = aws_vpc.myapp-vpc.id
+    tags = {
+        Name = "${var.env_prefix}-igw"
+    }
 }
 
-# creating subnet
+resource "aws_route_table" "main-rtb" {
+    vpc_id = aws_vpc.myapp-vpc.id
+    #default_route_table_id = aws_vpc.myapp-vpc.default_route_table_id
 
-resource "aws_subnet" "pub-sub-1" {
-  vpc_id  = aws_vpc.timi_vpc.id
-  cidr_block = "10.0.1.0/24"
-  availability_zone = "us-east-1a"
-
+    route {
+        cidr_block = "0.0.0.0/0"
+        gateway_id = aws_internet_gateway.myapp-igw.id
+    }
+    tags = {
+        Name = "${var.env_prefix}-main-rtb"
+    }
 }
-
-# subnet route table association
 
  resource "aws_route_table_association" "a" {
-  subnet_id      = aws_subnet.pub-sub-1.id
-  route_table_id = aws_route_table.timi-route-table.id
+  subnet_id      = aws_subnet.myapp-subnet-1.id
+  route_table_id = aws_route_table.main-rtb.id
 }
 
-# creating security group to allow port 80,443,22
-
-resource "aws_security_group" "allow_web" {
-  name        = "allow_web-traffic"
-  description = "Allow web inbound traffic"
-  vpc_id      = aws_vpc.timi_vpc.id
+resource "aws_security_group" "timi-sg" {
+  name        = "timi-sg"
+  #description = "Allow web inbound traffic"
+  vpc_id      = aws_vpc.myapp-vpc.id
 
   ingress {
     description      = "HTTPS"
@@ -75,6 +71,14 @@ resource "aws_security_group" "allow_web" {
     description      = "HTTP"
     from_port        = 80
     to_port          = 80
+    protocol         = "tcp"
+    cidr_blocks      = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description      = "HTTP"
+    from_port        = 8080
+    to_port          = 8080
     protocol         = "tcp"
     cidr_blocks      = ["0.0.0.0/0"]
   }
@@ -98,33 +102,87 @@ resource "aws_security_group" "allow_web" {
   }
 
   tags = {
-    Name = "allow_web"
-  }
+        Name = "${var.env_prefix}-timi-sg"
+    }
 }
 
-# creating a network interface with ip in the subnets
 
-resource "aws_network_interface" "webserver-net" {
-  subnet_id       = aws_subnet.pub-sub-1.id
-  private_ips     = ["10.0.1.50"]
-  security_groups = [aws_security_group.allow_web.id]
-
+/*
+resource "aws_security_group_rule" "web-http" {
+  security_group_id = aws_vpc.myapp-vpc.default_security_group_id
+  type              = "ingress"
+  from_port         = 8080
+  to_port           = 8080
+  protocol          = "tcp"
+  cidr_blocks       = ["0.0.0.0/0"]
 }
 
-# 9. create ubuntu server and install/enable apache2
+resource "aws_security_group_rule" "server-ssh" {
+  security_group_id = aws_vpc.myapp-vpc.default_security_group_id
+  type              = "ingress"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [var.my_ip]
+}
+*/
+/*
+data "aws_ami" "latest-amazon-linux-image" {
+    most_recent = true
+    owners = ["amazon"]
+    filter {
+        name = "name"
+        values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+    }
+    filter {
+        name = "virtualization-type"
+        values = ["hvm"]
+    }
+}
 
-resource "aws_instance" "web-server-instance" {
-  instance_type = "t2.micro"
-  ami = "ami-0778521d914d23bc1"
-  availability_zone = "us-east-1a"
-  key_name = "timi-ubuntu-keys"
 
-  network_interface {
-    device_index = 0
-    network_interface_id = aws_network_interface.webserver-net.id
-  }
+output "aws_ami_id" {
+    value = data.aws_ami.latest-amazon-linux-image.id
+}
+
+output "ec2_public_ip" {
+    value = aws_instance.myapp-server.public_ip
+}
+
+resource "aws_key_pair" "ssh-key" {
+    key_name = "timi-ubuntu-key"
+   # public_key = file(var.public_key_location)
+}
+*/
+
+
+resource "aws_instance" "myapp-server" {
+    #ami = data.aws_ami.latest-amazon-linux-image.id
+    instance_type = var.instance_type
+    ami = var.ami
+
+    subnet_id = aws_subnet.myapp-subnet-1.id
+    vpc_security_group_ids = [aws_security_group.timi-sg.id]
+    availability_zone = var.avail_zone
+
+    associate_public_ip_address = true
+    key_name = var.key_name
+
+   # user_data = file("entry-script.sh")
+   provisioner "file" {
+    source = "entry-script.sh"
+    destination = "/tmp/entry-script.sh"
+   }
+
+
+   connection {
+    user = "ubuntu"
+    #private_key = file("private_key = aws_key_pair.my_key_pair.private_key")
+
+    host = self.public_ip
+   }
+
     tags = {
-        Name = "web-server"
-    }    
-
+        Name = "${var.env_prefix}-server"
+    }
 }
